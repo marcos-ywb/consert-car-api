@@ -5,6 +5,7 @@ import cors from "cors";
 
 import authRouter from "./routes/auth";
 import { authMiddleware } from "./middlewares/auth";
+import { requireRole } from "./middlewares/requireRole";
 
 import customersRouter from "./routes/customers";
 import vehiclesRouter from "./routes/vehicles";
@@ -24,8 +25,10 @@ app.use(authMiddleware);
 app.use("/customers", customersRouter);
 app.use("/vehicles", vehiclesRouter);
 app.use("/appointments", appointmentsRouter);
-app.use("/orders", ordersRouter);
-app.use("/users", usersRouter);
+app.use("/orders", requireRole("OWNER", "ADMIN", "MECANICO"), ordersRouter);
+app.use("/users", requireRole("OWNER", "ADMIN"), usersRouter);
+
+//app.use("/admin", requireRole("OWNER", "ADMIN"), adminRouter);
 
 app.get("/", (req, res) => {
     res.json({ message: "API rodando!" });
