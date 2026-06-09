@@ -11,9 +11,32 @@ const SELECT_QUERY = `
         email,
         cargo,
         status,
+        deve_trocar_senha,
         criado_em
     FROM usuarios
 `;
+
+router.get("/", async (req: Request, res: Response) => {
+    try {
+        const { q } = req.query;
+
+        let query = SELECT_QUERY;
+        const params: string[] = [];
+
+        if (q) {
+            query += " WHERE nome LIKE ? OR email LIKE ? OR telefone LIKE ?";
+            params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+        }
+
+        query += " ORDER BY nome ASC";
+
+        const [rows] = await db.query(query, params);
+        res.json(rows);
+    } catch (error) {
+        console.error("Erro ao buscar equipe:", error);
+        res.status(500).json({ message: "Erro ao buscar equipe!" });
+    }
+});
 
 router.get("/:id", async (req: Request, res: Response) => {
     try {
