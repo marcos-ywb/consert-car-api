@@ -12,6 +12,7 @@ const SELECT_QUERY = `
         a.status,
         a.criado_em,
 
+        os.os_id,
 
         c.cliente_id,
         c.nome AS cliente_nome,
@@ -40,6 +41,7 @@ const SELECT_QUERY = `
     LEFT JOIN veiculos v ON v.veiculo_id = a.veiculo_id
     LEFT JOIN usuarios u ON u.usuario_id = a.usuario_id
     LEFT JOIN enderecos e ON e.cliente_id = c.cliente_id
+    LEFT JOIN ordens_servico os ON os.agendamento_id = a.agendamento_id
 `;
 
 router.get("/", async (req: Request, res: Response) => {
@@ -76,16 +78,22 @@ router.get("/", async (req: Request, res: Response) => {
             }
 
             if (row.endereco_id) {
-                grouped.get(row.agendamento_id).enderecos.push({
-                    endereco_id: row.endereco_id,
-                    cep: row.endereco_cep,
-                    logradouro: row.endereco_logradouro,
-                    numero: row.endereco_numero,
-                    bairro: row.endereco_bairro,
-                    cidade: row.endereco_cidade,
-                    estado: row.endereco_estado,
-                    complemento: row.endereco_complemento,
-                });
+                const alreadyExists = grouped.get(row.agendamento_id).enderecos.some(
+                    (e: any) => e.endereco_id === row.endereco_id
+                );
+
+                if (!alreadyExists) {
+                    grouped.get(row.agendamento_id).enderecos.push({
+                        endereco_id: row.endereco_id,
+                        cep: row.endereco_cep,
+                        logradouro: row.endereco_logradouro,
+                        numero: row.endereco_numero,
+                        bairro: row.endereco_bairro,
+                        cidade: row.endereco_cidade,
+                        estado: row.endereco_estado,
+                        complemento: row.endereco_complemento,
+                    });
+                }
             }
         }
 
@@ -110,16 +118,19 @@ router.get("/:id", async (req: Request, res: Response) => {
 
         for (const row of rows) {
             if (row.endereco_id) {
-                base.enderecos.push({
-                    endereco_id: row.endereco_id,
-                    cep: row.endereco_cep,
-                    logradouro: row.endereco_logradouro,
-                    numero: row.endereco_numero,
-                    bairro: row.endereco_bairro,
-                    cidade: row.endereco_cidade,
-                    estado: row.endereco_estado,
-                    complemento: row.endereco_complemento,
-                });
+                const alreadyExists = base.enderecos.some((e: any) => e.endereco_id === row.endereco_id);
+                if (!alreadyExists) {
+                    base.enderecos.push({
+                        endereco_id: row.endereco_id,
+                        cep: row.endereco_cep,
+                        logradouro: row.endereco_logradouro,
+                        numero: row.endereco_numero,
+                        bairro: row.endereco_bairro,
+                        cidade: row.endereco_cidade,
+                        estado: row.endereco_estado,
+                        complemento: row.endereco_complemento,
+                    });
+                }
             }
         }
 
@@ -164,4 +175,29 @@ router.post("/", async (req: Request, res: Response) => {
     }
 });
 
+router.patch("/:id/status", async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        const statusPermitidos = ["AGENDADO", "CANCELADO", "CONCLUIDO"];
+        if (!status || !statusPermitidos.includes(status)) {
+            return res.status(400).json({ message: "Status inválido ou não informado." });
+        }
+
+        const query = "UPDATE agendamentos SET status = ? WHERE agendamento_id = ?";
+        const params = [status, id];
+
+        const [result]: any = await db.query(query, params);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: "Agendamento não encontrado!" });
+        }
+
+        res.json({ message: `Status do agendamento atualizado para ${status} com sucesso!` });
+    } catch (error) {
+        console.error("Erro ao atualizar status do agendamento:", error);
+        res.status(500).json({ message: "Erro ao atualizar status do agendamento!" });
+    }
+});
 export default router;

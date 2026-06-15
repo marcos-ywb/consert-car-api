@@ -12,6 +12,7 @@ import vehiclesRouter from "./routes/vehicles";
 import appointmentsRouter from "./routes/appointments";
 import ordersRouter from "./routes/orders";
 import usersRouter from "./routes/users";
+import searchRouter from "./routes/search";
 
 const app = express();
 const PORT = 3000;
@@ -27,6 +28,7 @@ app.use("/vehicles", vehiclesRouter);
 app.use("/appointments", appointmentsRouter);
 app.use("/orders", requireRole("OWNER", "ADMIN", "MECANICO"), ordersRouter);
 app.use("/users", requireRole("OWNER", "ADMIN"), usersRouter);
+app.use("/search", searchRouter);
 
 //app.use("/admin", requireRole("OWNER", "ADMIN"), adminRouter);
 
