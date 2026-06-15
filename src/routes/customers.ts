@@ -180,44 +180,99 @@ router.post("/", async (req: Request, res: Response) => {
 
 router.put("/:id", async (req: Request, res: Response) => {
     const connection = await db.getConnection();
+    const clienteId = req.params.id;
+    const { name, phone, cpf, enderecos, veiculos } = req.body;
+
     try {
         await connection.beginTransaction();
-        const clienteId = req.params.id;
-        const { name, phone, cpf, enderecos, veiculos } = req.body;
+
+        const nomeFinal = name || "";
+        const telefoneFinal = phone ? phone.replace(/\D/g, "") : "";
+        const cpfFinal = cpf ? cpf.replace(/\D/g, "") : null;
 
         await connection.query(
             `UPDATE clientes SET nome = ?, telefone = ?, cpf = ? WHERE cliente_id = ?`,
-            [name, phone.replace(/\D/g, ""), cpf ? cpf.replace(/\D/g, "") : null, clienteId]
+            [nomeFinal, telefoneFinal, cpfFinal, clienteId]
         );
 
         if (Array.isArray(enderecos)) {
             await connection.query("DELETE FROM enderecos WHERE cliente_id = ?", [clienteId]);
             for (const addr of enderecos) {
+                if (!addr.cep || !addr.logradouro) continue;
+
                 await connection.query(
                     `INSERT INTO enderecos (cliente_id, cep, logradouro, numero, bairro, cidade, estado, complemento)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [clienteId, addr.cep.replace(/\D/g, ""), addr.logradouro, addr.numero, addr.bairro, addr.cidade, addr.estado, addr.complemento || null]
+                    [clienteId, addr.cep.replace(/\D/g, ""), addr.logradouro || "", addr.numero || "", addr.bairro || "", addr.cidade || "", addr.estado || "", addr.complemento || null]
                 );
             }
         }
 
         if (Array.isArray(veiculos)) {
-            await connection.query("DELETE FROM veiculos WHERE cliente_id = ?", [clienteId]);
-            for (const vec of veiculos) {
-                await connection.query(
-                    `INSERT INTO veiculos (cliente_id, placa, marca, modelo, ano, cor)
-                     VALUES (?, ?, ?, ?, ?, ?)`,
-                    [clienteId, vec.placa.replace(/[^a-zA-Z0-9]/g, "").toUpperCase(), vec.marca, vec.modelo, vec.ano || null, vec.cor || null]
-                );
+            const incomingVehicles = veiculos
+                .filter(v => v.placa && v.marca)
+                .map(vec => ({
+                    veiculo_id: vec.veiculo_id && vec.veiculo_id !== 0 ? parseInt(String(vec.veiculo_id), 10) : null,
+                    placa: vec.placa.replace(/[^a-zA-Z0-9]/g, "").toUpperCase(),
+                    marca: vec.marca || "",
+                    modelo: vec.modelo || "",
+                    ano: vec.ano || null,
+                    cor: vec.cor || null
+                }));
+
+            const [currentVehicles]: any = await connection.query(
+                "SELECT veiculo_id FROM veiculos WHERE cliente_id = ?",
+                [clienteId]
+            );
+            const currentIds = currentVehicles.map((v: any) => v.veiculo_id);
+
+            const incomingIds = incomingVehicles.map(v => v.veiculo_id).filter(id => id !== null) as number[];
+            const idsToDelete = currentIds.filter((id: any) => !incomingIds.includes(id));
+
+            for (const vId of idsToDelete) {
+                try {
+                    await connection.query("DELETE FROM veiculos WHERE veiculo_id = ? AND cliente_id = ?", [vId, clienteId]);
+                } catch (delError: any) {
+                    if (delError.code === "ER_ROW_IS_REFERENCED_2" || delError.errno === 1451) {
+                        console.error(`AVISO DE INTEGRIDADE: Veículo ID ${vId} não pôde ser removido pois possui agendamentos.`);
+                        throw new Error("CANNOT_DELETE_VEHICLE_WITH_AGENDAMENTO");
+                    } else {
+                        throw delError;
+                    }
+                }
+            }
+
+            for (const vec of incomingVehicles) {
+                if (vec.veiculo_id && currentIds.includes(vec.veiculo_id)) {
+                    await connection.query(
+                        `UPDATE veiculos SET placa = ?, marca = ?, modelo = ?, ano = ?, cor = ? 
+                         WHERE veiculo_id = ? AND cliente_id = ?`,
+                        [vec.placa, vec.marca, vec.modelo, vec.ano, vec.cor, vec.veiculo_id, clienteId]
+                    );
+                } else {
+                    await connection.query(
+                        `INSERT INTO veiculos (cliente_id, placa, marca, modelo, ano, cor)
+                         VALUES (?, ?, ?, ?, ?, ?)`,
+                        [clienteId, vec.placa, vec.marca, vec.modelo, vec.ano, vec.cor]
+                    );
+                }
             }
         }
 
         await connection.commit();
         res.json({ message: "Cliente atualizado com sucesso!" });
-    } catch (error) {
+
+    } catch (error: any) {
         await connection.rollback();
-        console.error(error);
-        res.status(500).json({ message: "Erro ao atualizar dados do cliente." });
+        console.error("ERRO CRÍTICO NO UPDATE DE CLIENTE:", error);
+
+        if (error.message === "CANNOT_DELETE_VEHICLE_WITH_AGENDAMENTO") {
+            return res.status(409).json({
+                message: "Não foi possível salvar as alterações. Você tentou remover um veículo que já possui agendamentos cadastrados. Por favor, remova ou altere os agendamentos vinculados antes de tentar remover o veículo."
+            });
+        }
+
+        res.status(500).json({ message: "Erro interno no servidor ao salvar alterações do cliente." });
     } finally {
         connection.release();
     }
